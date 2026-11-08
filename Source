@@ -1,0 +1,2462 @@
+--[[
+    ImGui.lua — Roblox ImGui-inspired GUI library
+    Includes persistent tab bars and tab pages.
+    Custom animated collapse icon.
+]]
+
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+--========================================================================
+-- THEME
+--========================================================================
+
+local Style = {
+	Text = Color3.fromRGB(255, 255, 255),
+	TextTransparency = 0,
+
+	TextDisabled = Color3.fromRGB(128, 128, 128),
+	TextDisabledTransparency = 0,
+
+	WindowBg = Color3.fromRGB(15, 15, 15),
+	WindowBgTransparency = 0.06,
+
+	PopupBg = Color3.fromRGB(20, 20, 20),
+	PopupBgTransparency = 0.06,
+
+	Border = Color3.fromRGB(110, 110, 128),
+	BorderTransparency = 0.50,
+
+	FrameBg = Color3.fromRGB(41, 74, 122),
+	FrameBgTransparency = 0.46,
+
+	FrameBgHovered = Color3.fromRGB(66, 150, 250),
+	FrameBgHoveredTransparency = 0.60,
+
+	FrameBgActive = Color3.fromRGB(66, 150, 250),
+	FrameBgActiveTransparency = 0.33,
+
+	-- ImGuiCol_TitleBg: the title bar color when the WINDOW IS NOT
+	-- FOCUSED (click anywhere outside it and it drops to this almost-
+	-- black). ImGuiCol_TitleBgActive is the focused/blue state.
+	TitleBg = Color3.fromRGB(10, 10, 10),
+	TitleBgTransparency = 0,
+
+	TitleBgActive = Color3.fromRGB(41, 74, 122),
+	TitleBgActiveTransparency = 0,
+
+	ScrollbarBg = Color3.fromRGB(5, 5, 5),
+	ScrollbarBgTransparency = 0.47,
+
+	ScrollbarGrab = Color3.fromRGB(79, 79, 79),
+	ScrollbarGrabTransparency = 0,
+
+	CheckMark = Color3.fromRGB(66, 150, 250),
+	CheckMarkTransparency = 0,
+
+	SliderGrab = Color3.fromRGB(61, 133, 224),
+	SliderGrabTransparency = 0,
+
+	SliderGrabActive = Color3.fromRGB(66, 150, 250),
+	SliderGrabActiveTransparency = 0,
+
+	Button = Color3.fromRGB(66, 150, 250),
+	ButtonTransparency = 0.60,
+
+	ButtonHovered = Color3.fromRGB(66, 150, 250),
+	ButtonHoveredTransparency = 0,
+
+	ButtonActive = Color3.fromRGB(15, 135, 250),
+	ButtonActiveTransparency = 0,
+
+	Header = Color3.fromRGB(66, 150, 250),
+	HeaderTransparency = 0.69,
+
+	HeaderHovered = Color3.fromRGB(66, 150, 250),
+	HeaderHoveredTransparency = 0.20,
+
+	HeaderActive = Color3.fromRGB(66, 150, 250),
+	HeaderActiveTransparency = 0,
+
+	-- Tab colors — upstream does NOT hardcode these, it derives them
+	-- every frame from Header/HeaderActive/TitleBg/TitleBgActive via
+	-- ImLerp(). These four are that same math pre-computed:
+	--   Tab                = Lerp(Header,       TitleBgActive, 0.80)
+	--   TabActive           = Lerp(HeaderActive, TitleBgActive, 0.60)
+	--   TabUnfocused        = Lerp(Tab,          TitleBg,       0.80)
+	--   TabUnfocusedActive  = Lerp(TabActive,    TitleBg,       0.40)
+	-- (TabHovered has no separate formula upstream — it's just a copy
+	-- of HeaderHovered, used directly below instead of duplicated here.)
+	Tab = Color3.fromRGB(46, 89, 148),
+	TabTransparency = 0.138,
+
+	TabActive = Color3.fromRGB(51, 105, 173),
+	TabActiveTransparency = 0,
+
+	TabUnfocused = Color3.fromRGB(17, 26, 38),
+	TabUnfocusedTransparency = 0.028,
+
+	TabUnfocusedActive = Color3.fromRGB(35, 67, 108),
+	TabUnfocusedActiveTransparency = 0,
+
+	-- ImGuiCol_PlotHistogram = (0.90, 0.70, 0.00, 1.00) — used here for
+	-- ProgressBar's fill, same as upstream.
+	PlotHistogram = Color3.fromRGB(230, 179, 0),
+	PlotHistogramTransparency = 0,
+
+	ResizeGrip = Color3.fromRGB(66, 150, 250),
+	ResizeGripTransparency = 0.75,
+
+	ResizeGripHovered = Color3.fromRGB(66, 150, 250),
+	ResizeGripHoveredTransparency = 0.33,
+
+	ResizeGripActive = Color3.fromRGB(66, 150, 250),
+	ResizeGripActiveTransparency = 0.05,
+
+	Font = Enum.Font.RobotoMono,
+	FontBold = Enum.Font.RobotoMono,
+	TextSize = 14,
+
+	WindowRounding = UDim.new(0, 0),
+	FrameRounding = UDim.new(0, 0),
+	ScrollbarRounding = 9,
+	GrabRounding = UDim.new(0, 0),
+	-- Upstream's one real exception to FrameRounding=0: tabs round their
+	-- TOP corners only (TabRounding default = 4). Roblox's UICorner has
+	-- no per-corner radius, so this is faked below with a square mask
+	-- over the bottom few pixels of each tab button.
+	TabRounding = UDim.new(0, 4),
+
+	WindowBorderSize = 1,
+	FrameBorderSize = 0,
+
+	WindowPaddingX = 8,
+	WindowPaddingY = 8,
+
+	ItemSpacingX = 8,
+	ItemSpacingY = 4,
+
+	FramePaddingX = 4,
+	FramePaddingY = 3,
+
+	GrabMinSize = 10,
+	ScrollbarSize = 14,
+
+	-- Collapse/close hit-boxes: upstream sizes these to ~FontSize too;
+	-- both are the same square size here so neither looks mismatched.
+	ChromeButtonSize = 16,
+}
+
+-- FrameHeight: upstream's real formula (ImGui::GetFrameHeight()) is
+-- FontSize + FramePadding.y*2. Confirmed source value: ImGui's default
+-- embedded font (ProggyClean) is 13px, so upstream's OWN default
+-- FrameHeight is 13 + 3*2 = 19px — this was previously a disconnected
+-- hardcoded 26, nearly 40% taller than the real formula for no
+-- documented reason. Computed here from Style.TextSize (14, chosen for
+-- Roblox's own fonts, not ProggyClean's 13) so it stays correct if
+-- TextSize or FramePaddingY ever change, rather than drifting out of
+-- sync as a second hardcoded number.
+Style.FrameHeight = Style.TextSize + Style.FramePaddingY * 2
+
+-- Upstream's title bar and tab bar both use this exact same
+-- GetFrameHeight() value too — there's no separate formula for either
+-- one, so unlike the previous version (which hardcoded both to an
+-- unrelated 22), these now just equal FrameHeight directly.
+Style.TitleBarHeight = Style.FrameHeight
+Style.TabBarHeight = Style.FrameHeight
+
+--========================================================================
+-- INTERNAL STATE
+--========================================================================
+
+local ImGui = {}
+
+local Windows = {}
+local WindowStack = {}
+local WidgetState = {}
+
+local ScreenGui = nil
+
+local COLLAPSE_ICON = "rbxassetid://112515660895697"
+local COLLAPSE_ROTATION = 0
+local COLLAPSE_SIZE = UDim2.fromOffset(14, 14)
+local COLLAPSE_ANIMATION_TIME = 0.16
+
+local CHECKMARK_ICON = "rbxassetid://18926561608"
+
+-- Window focus tracking (ImGuiCol_TitleBg vs TitleBgActive): only one
+-- window is "focused" at a time. Clicking a window's title bar, body,
+-- or any widget focuses it; clicking anywhere else (empty game world,
+-- or outside every ImGui window) clears focus, and every window's
+-- title bar + tabs drop to their unfocused colors.
+local FocusedWindow = nil
+local TopZIndex = 100
+local focusHookInstalled = false
+
+local function getScreenGui()
+	if ScreenGui and ScreenGui.Parent then
+		return ScreenGui
+	end
+
+	ScreenGui = Instance.new("ScreenGui")
+	ScreenGui.Name = "ImGuiRoot"
+	ScreenGui.ResetOnSpawn = false
+	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	ScreenGui.DisplayOrder = 100
+	ScreenGui.Parent = PlayerGui
+
+	return ScreenGui
+end
+
+--========================================================================
+-- HELPERS
+--========================================================================
+
+local function corner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = radius or Style.FrameRounding
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, transparency, thickness)
+	local s = Instance.new("UIStroke")
+	s.Color = color or Style.Border
+	s.Transparency = transparency or 0
+	s.Thickness = thickness or 1
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+-- Squares off the bottom N pixels of an already-rounded element, so a
+-- UICorner (which rounds all 4 corners) ends up looking top-rounded /
+-- bottom-square — used for tabs (and could be reused for title bars).
+local function squareBottomMask(parent, color, transparency, heightPx)
+	local mask = Instance.new("Frame")
+	mask.Name = "BottomMask"
+	mask.BackgroundColor3 = color
+	mask.BackgroundTransparency = transparency
+	mask.BorderSizePixel = 0
+	mask.Size = UDim2.new(1, 0, 0, heightPx)
+	mask.Position = UDim2.new(0, 0, 1, -heightPx)
+	mask.ZIndex = parent.ZIndex
+	mask.Parent = parent
+	return mask
+end
+
+-- A small down-pointing chevron (two thin bars meeting at a point)
+-- built from plain Frames instead of a Unicode ▾/▼ text glyph.
+-- Roblox's built-in fonts frequently don't include geometric symbol
+-- glyphs at all — confirmed by CollapsingHeader's arrow silently
+-- rendering as nothing with one. Pure geometry always renders
+-- regardless of font glyph coverage, so this is used wherever the
+-- library previously relied on a symbol character.
+local function makeChevronDown(parent, size, color, transparency)
+	local holder = Instance.new("Frame")
+	holder.Name = "Chevron"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.fromOffset(size, size)
+	holder.Parent = parent
+
+	local function bar(xOffset, rotation)
+		local b = Instance.new("Frame")
+		b.AnchorPoint = Vector2.new(0.5, 0.5)
+		b.Position = UDim2.new(0.5, xOffset, 0.5, 0)
+		b.Size = UDim2.fromOffset(math.floor(size * 0.6), 2)
+		b.Rotation = rotation
+		b.BackgroundColor3 = color
+		b.BackgroundTransparency = transparency
+		b.BorderSizePixel = 0
+		b.Parent = holder
+		return b
+	end
+
+	local left = bar(-math.floor(size * 0.17), 45)
+	local right = bar(math.floor(size * 0.17), -45)
+
+	return holder, left, right
+end
+
+-- A genuine filled right-triangle in the bottom-right corner (matching
+-- the look of the original ◢ glyph — "BLACK LOWER RIGHT TRIANGLE" —
+-- rather than a dot cluster), built with a well-known Frame-only trick:
+-- a square ~1.4x the container's size, rotated 45°, centered exactly
+-- on the container's own bottom-right corner point. Since a square
+-- rotated 45° is a diamond whose four corners point up/down/left/right
+-- from its center, and the container only extends up-and-left from
+-- that corner, only the up-left QUARTER of the diamond falls inside
+-- the container's bounds — and that quarter is itself a right
+-- triangle, with its right-angle vertex sitting exactly at the corner.
+-- parent.ClipsDescendants = true cuts away the rest of the diamond.
+local function makeResizeTriangle(parent, color, transparency)
+	parent.ClipsDescendants = true
+
+	local size = parent.AbsoluteSize.X > 0 and parent.AbsoluteSize.X or parent.Size.X.Offset
+	local wedge = Instance.new("Frame")
+	wedge.Name = "Wedge"
+	wedge.AnchorPoint = Vector2.new(0.5, 0.5)
+	wedge.Position = UDim2.new(1, 0, 1, 0)
+	wedge.Size = UDim2.fromOffset(size * 1.4, size * 1.4)
+	wedge.Rotation = 45
+	wedge.BackgroundColor3 = color
+	wedge.BackgroundTransparency = transparency
+	wedge.BorderSizePixel = 0
+	wedge.Parent = parent
+
+	return wedge
+end
+
+local function splitLabel(label)
+	local visible = label:match("^(.-)##")
+	if visible then
+		return visible, label
+	end
+
+	return label, label
+end
+
+local function getState(id, defaults)
+	local s = WidgetState[id]
+
+	if not s then
+		s = {}
+
+		for k, v in pairs(defaults) do
+			s[k] = v
+		end
+
+		WidgetState[id] = s
+	end
+
+	return s
+end
+
+-- ID stack (PushID/PopID), same purpose as upstream's: lets a loop that
+-- creates several widgets with the same label give each one distinct
+-- state. This also fixes a real bug that existed before PushID was
+-- added at all — WidgetState was keyed by the bare label text with NO
+-- window scoping, so two different windows each containing e.g. a
+-- Checkbox("Enabled", ...) silently shared one stored boolean. scopedId
+-- below always prefixes with the window's title, so that collision is
+-- gone regardless of whether the caller ever uses PushID.
+local IDStack = {}
+
+function ImGui.PushID(id)
+	table.insert(IDStack, tostring(id))
+end
+
+function ImGui.PopID()
+	table.remove(IDStack)
+end
+
+local function scopedId(win, id)
+	if #IDStack > 0 then
+		return win.title .. "##" .. table.concat(IDStack, "/") .. "##" .. id
+	end
+	return win.title .. "##" .. id
+end
+
+local function currentWindow()
+	return WindowStack[#WindowStack]
+end
+
+local function nextOrder()
+	local win = currentWindow()
+	win.nextOrder = win.nextOrder + 1
+	return win.nextOrder
+end
+
+local function animateCollapseIcon(win, collapsed)
+	if not win.collapseIcon then
+		return
+	end
+
+	if win.collapseTween then
+		win.collapseTween:Cancel()
+		win.collapseTween = nil
+	end
+
+	-- Expanded = 0 degrees (right)
+	-- Collapsed = -90 degrees (down)
+	local targetRotation = collapsed and -90 or COLLAPSE_ROTATION
+
+	local tween = TweenService:Create(
+		win.collapseIcon,
+		TweenInfo.new(
+			COLLAPSE_ANIMATION_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		),
+		{
+			Rotation = targetRotation
+		}
+	)
+
+	win.collapseTween = tween
+	tween:Play()
+end
+
+--========================================================================
+-- FOCUS (TitleBg <-> TitleBgActive, and the Tab vs TabUnfocused family)
+--========================================================================
+
+local function bringToFront(win)
+	TopZIndex = TopZIndex + 1
+	win.root.ZIndex = TopZIndex
+end
+
+-- Repaints one tab's button to match its current selected / hovered /
+-- window-focused state. hovered is only ever true while the mouse is
+-- actually over that specific tab (tracked via its own MouseEnter/
+-- MouseLeave, stored on the tab table so this can be re-run on focus
+-- change too, not just on hover change).
+--
+-- Also handles the tab-bar separator "merge" effect: upstream draws one
+-- continuous Separator line under the whole tab bar, but the ACTIVE
+-- tab's bottom edge is drawn a couple pixels further down so it visibly
+-- covers that line right under itself — inactive tabs stop short of it,
+-- so the line peeks out beneath them. Roblox has no line-under-rect
+-- draw-order trick, so this is approximated by literally shrinking the
+-- inactive tab buttons by TAB_BAR_GAP pixels so the tab bar's own
+-- Underline (a sibling 1px frame at its bottom edge, lower ZIndex than
+-- every tab) shows through only in that gap.
+local TAB_BAR_GAP = 2
+
+local function paintTab(tab, state, focused)
+	local selected = (state.selected == tab.id)
+	tab.page.Visible = selected
+
+	local color, transparency
+	if selected then
+		color = focused and Style.TabActive or Style.TabUnfocusedActive
+		transparency = focused and Style.TabActiveTransparency or Style.TabUnfocusedActiveTransparency
+	elseif tab.hovered then
+		color = Style.HeaderHovered -- upstream: TabHovered = HeaderHovered, no focused/unfocused split
+		transparency = Style.HeaderHoveredTransparency
+	else
+		color = focused and Style.Tab or Style.TabUnfocused
+		transparency = focused and Style.TabTransparency or Style.TabUnfocusedTransparency
+	end
+
+	tab.button.BackgroundColor3 = color
+	tab.button.BackgroundTransparency = transparency
+	-- keep the bottom-rounding mask in sync so there's no stale seam
+	tab.mask.BackgroundColor3 = color
+	tab.mask.BackgroundTransparency = transparency
+
+	tab.button.Size = selected
+		and UDim2.new(0, 0, 1, 0)                -- full height: covers the separator line (merged with content)
+		or UDim2.new(0, 0, 1, -TAB_BAR_GAP)       -- short: exposes the separator line beneath it
+end
+
+local function updateTabVisuals(state, focused)
+	for _, tab in ipairs(state.tabs) do
+		paintTab(tab, state, focused)
+	end
+end
+
+local function updateTitleBarColors(win)
+	local focused = (FocusedWindow == win)
+	win.titleFocused = focused
+
+	win.titleBar.BackgroundColor3 = focused and Style.TitleBgActive or Style.TitleBg
+	win.titleBar.BackgroundTransparency = focused and Style.TitleBgActiveTransparency or Style.TitleBgTransparency
+
+	for _, tb in pairs(win.tabBars) do
+		updateTabVisuals(tb, focused)
+	end
+end
+
+local function setFocusedWindow(win)
+	if FocusedWindow == win then
+		if win then bringToFront(win) end
+		return
+	end
+
+	local previous = FocusedWindow
+	FocusedWindow = win
+
+	if previous then updateTitleBarColors(previous) end
+	if win then
+		updateTitleBarColors(win)
+		bringToFront(win)
+	end
+end
+
+local function pointInGui(x, y, guiObject)
+	local p = guiObject.AbsolutePosition
+	local s = guiObject.AbsoluteSize
+	return x >= p.X and x <= p.X + s.X and y >= p.Y and y <= p.Y + s.Y
+end
+
+-- Installed once: a global click/tap anywhere decides window focus by
+-- position, regardless of which child widget (if any) consumed the
+-- input — clicking a button inside a window still counts as clicking
+-- that window. Clicking outside every window clears focus entirely.
+local function installFocusHook()
+	if focusHookInstalled then return end
+	focusHookInstalled = true
+
+	UserInputService.InputBegan:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		local x, y = input.Position.X, input.Position.Y
+		local hit, hitZ = nil, -math.huge
+
+		for _, win in pairs(Windows) do
+			if win.root and win.root.Visible and pointInGui(x, y, win.root) then
+				if win.root.ZIndex > hitZ then
+					hit = win
+					hitZ = win.root.ZIndex
+				end
+			end
+		end
+
+		setFocusedWindow(hit)
+	end)
+end
+
+--========================================================================
+-- WINDOW CREATION
+--========================================================================
+
+local function createWindowInstances(win)
+	local root = Instance.new("Frame")
+	root.Name = "ImGuiWindow_" .. win.title
+	root.Size = UDim2.fromOffset(win.w, win.h)
+	root.Position = UDim2.fromOffset(win.x, win.y)
+	root.BackgroundColor3 = Style.WindowBg
+	root.BackgroundTransparency = Style.WindowBgTransparency
+	root.BorderSizePixel = 0
+	root.Parent = getScreenGui()
+
+	corner(root, Style.WindowRounding)
+	stroke(root, Style.Border, Style.BorderTransparency, Style.WindowBorderSize)
+
+	local titleBar = Instance.new("Frame")
+	titleBar.Name = "TitleBar"
+	titleBar.Size = UDim2.new(1, 0, 0, Style.TitleBarHeight)
+	titleBar.BackgroundColor3 = Style.TitleBg -- starts unfocused; setFocusedWindow() below flips it
+	titleBar.BackgroundTransparency = Style.TitleBgTransparency
+	titleBar.BorderSizePixel = 0
+	titleBar.Parent = root
+
+	corner(titleBar, Style.WindowRounding)
+
+	local btnPad = (Style.TitleBarHeight - Style.ChromeButtonSize) / 2
+
+	-- Collapse button
+	local collapseBtn = Instance.new("ImageButton")
+	collapseBtn.Name = "CollapseBtn"
+	collapseBtn.BackgroundTransparency = 1
+	collapseBtn.Size = UDim2.fromOffset(Style.ChromeButtonSize, Style.ChromeButtonSize)
+	collapseBtn.Position = UDim2.new(0, 6, 0, btnPad)
+	collapseBtn.Image = ""
+	collapseBtn.AutoButtonColor = false
+	collapseBtn.Parent = titleBar
+
+	-- Actual collapse image
+	local collapseIcon = Instance.new("ImageLabel")
+	collapseIcon.Name = "Icon"
+	collapseIcon.BackgroundTransparency = 1
+	collapseIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	collapseIcon.Position = UDim2.fromScale(0.5, 0.5)
+	collapseIcon.Size = COLLAPSE_SIZE
+	collapseIcon.Image = COLLAPSE_ICON
+	collapseIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
+	collapseIcon.ImageTransparency = 0
+	collapseIcon.Rotation = COLLAPSE_ROTATION
+	collapseIcon.ScaleType = Enum.ScaleType.Fit
+	collapseIcon.Parent = collapseBtn
+
+	local titleText = Instance.new("TextLabel")
+	titleText.Name = "TitleText"
+	titleText.BackgroundTransparency = 1
+	titleText.Size = UDim2.new(1, -(6 + Style.ChromeButtonSize + 4 + 6 + Style.ChromeButtonSize), 1, 0)
+	titleText.Position = UDim2.fromOffset(6 + Style.ChromeButtonSize + 4, 0)
+	titleText.Font = Style.FontBold
+	titleText.TextSize = Style.TextSize
+	titleText.TextColor3 = Style.Text
+	titleText.TextTransparency = Style.TextTransparency
+	titleText.TextXAlignment = Enum.TextXAlignment.Left
+	titleText.Text = win.title
+	titleText.Parent = titleBar
+
+	-- Close button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseBtn"
+	closeBtn.AnchorPoint = Vector2.new(1, 0)
+	closeBtn.Position = UDim2.new(1, -6, 0, btnPad)
+	closeBtn.Size = UDim2.fromOffset(Style.ChromeButtonSize, Style.ChromeButtonSize)
+	closeBtn.BackgroundColor3 = Style.ButtonHovered
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.AutoButtonColor = false
+	closeBtn.Font = Style.FontBold
+	closeBtn.TextSize = 12
+	closeBtn.TextColor3 = Style.TextDisabled
+	closeBtn.Text = "X"
+	closeBtn.Visible = false
+	closeBtn.Parent = titleBar
+
+	corner(closeBtn, UDim.new(0, 2))
+
+	closeBtn.MouseEnter:Connect(function()
+		closeBtn.BackgroundTransparency = Style.ButtonHoveredTransparency
+		closeBtn.TextColor3 = Style.Text
+	end)
+
+	closeBtn.MouseLeave:Connect(function()
+		closeBtn.BackgroundTransparency = 1
+		closeBtn.TextColor3 = Style.TextDisabled
+	end)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		win.openFlag = false
+	end)
+
+	-- Resize grip. Was a Unicode ◢ glyph — same font-glyph-coverage
+	-- risk as CollapsingHeader's old arrow, so it's geometry now too.
+	local grip = Instance.new("TextButton")
+	grip.Name = "ResizeGrip"
+	grip.AnchorPoint = Vector2.new(1, 1)
+	grip.Position = UDim2.new(1, 0, 1, 0)
+	grip.Size = UDim2.fromOffset(16, 16)
+	grip.BackgroundTransparency = 1
+	grip.AutoButtonColor = false
+	grip.Text = ""
+	grip.ZIndex = 5
+	grip.Parent = root
+
+	local gripWedge = makeResizeTriangle(grip, Style.ResizeGrip, Style.ResizeGripTransparency)
+
+	grip.MouseEnter:Connect(function()
+		gripWedge.BackgroundColor3 = Style.ResizeGripHovered
+		gripWedge.BackgroundTransparency = Style.ResizeGripHoveredTransparency
+	end)
+
+	grip.MouseLeave:Connect(function()
+		gripWedge.BackgroundColor3 = Style.ResizeGrip
+		gripWedge.BackgroundTransparency = Style.ResizeGripTransparency
+	end)
+
+	collapseBtn.MouseButton1Click:Connect(function()
+		win.collapsed = not win.collapsed
+		animateCollapseIcon(win, win.collapsed)
+	end)
+
+	-- Main scrolling body
+	local body = Instance.new("ScrollingFrame")
+	body.Name = "Body"
+	body.BackgroundTransparency = 1
+	body.BorderSizePixel = 0
+	body.Position = UDim2.fromOffset(0, Style.TitleBarHeight)
+	body.Size = UDim2.new(1, 0, 1, -Style.TitleBarHeight)
+	body.CanvasSize = UDim2.new(0, 0, 0, 0)
+	body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	body.ScrollBarThickness = 4
+	body.ScrollBarImageColor3 = Style.ScrollbarGrab
+	body.ScrollBarImageTransparency = Style.ScrollbarGrabTransparency
+	body.Parent = root
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, Style.ItemSpacingY)
+	layout.Parent = body
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, Style.WindowPaddingY)
+	padding.PaddingBottom = UDim.new(0, Style.WindowPaddingY)
+	padding.PaddingLeft = UDim.new(0, Style.WindowPaddingX)
+	padding.PaddingRight = UDim.new(0, Style.WindowPaddingX)
+	padding.Parent = body
+
+	-- Window dragging (also focuses the window on mouse-down, same as
+	-- the global focus hook, so there's no one-frame lag waiting on it)
+	local dragging = false
+	local dragStart
+	local startPos
+
+	titleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			setFocusedWindow(win)
+
+			dragging = true
+			dragStart = input.Position
+			startPos = root.Position
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (
+			input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch
+			) then
+			local delta = input.Position - dragStart
+
+			root.Position = UDim2.fromOffset(
+				startPos.X.Offset + delta.X,
+				startPos.Y.Offset + delta.Y
+			)
+
+			win.x = root.Position.X.Offset
+			win.y = root.Position.Y.Offset
+		end
+	end)
+
+	-- Window resizing
+	local resizing = false
+	local resizeStart
+	local startSize
+
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+
+			resizing = true
+			resizeStart = input.Position
+			startSize = root.Size
+
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					resizing = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if resizing and (
+			input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch
+			) then
+			local delta = input.Position - resizeStart
+
+			local newW = math.max(180, startSize.X.Offset + delta.X)
+			local newH = math.max(120, startSize.Y.Offset + delta.Y)
+
+			root.Size = UDim2.fromOffset(newW, newH)
+			win.w = newW
+			win.h = newH
+		end
+	end)
+
+	win.root = root
+	win.titleBar = titleBar
+	win.body = body
+	win.baseBody = body
+	win.titleText = titleText
+	win.collapseBtn = collapseBtn
+	win.collapseIcon = collapseIcon
+	win.closeBtn = closeBtn
+	win.grip = grip
+	win.tabBars = {}
+	win.titleFocused = false
+end
+
+--========================================================================
+-- BEGIN / END
+--========================================================================
+
+function ImGui.Begin(title, opts)
+	opts = opts or {}
+
+	installFocusHook()
+
+	local win = Windows[title]
+	local isNew = false
+
+	if not win then
+		isNew = true
+		win = {
+			title = title,
+			x = opts.x or 100,
+			y = opts.y or 100,
+			w = opts.w or 300,
+			h = opts.h or 400,
+			nextOrder = 0,
+			lastSeenFrame = -1,
+			collapsed = false,
+			openFlag = true,
+		}
+
+		Windows[title] = win
+		createWindowInstances(win)
+	end
+
+	win.closeBtn.Visible = opts.closable or false
+
+	if not win.openFlag then
+		win.root.Visible = false
+		return false
+	end
+
+	-- A brand-new window starts focused, same as upstream.
+	if isNew then
+		setFocusedWindow(win)
+	end
+
+	win.nextOrder = 0
+	win.body = win.baseBody
+	win.activeTabBar = nil
+
+	win.lastSeenFrame = ImGui._frame
+	win.root.Visible = true
+	win.body.Visible = not win.collapsed
+	win.grip.Visible = not win.collapsed
+
+	win.root.Size = win.collapsed
+		and UDim2.fromOffset(win.w, Style.TitleBarHeight)
+		or UDim2.fromOffset(win.w, win.h)
+
+	-- Do not set collapseIcon.Rotation here.
+	-- The click handler controls it so the tween can finish.
+
+	table.insert(WindowStack, win)
+
+	return true
+end
+
+function ImGui.OpenWindow(title)
+	local win = Windows[title]
+
+	if win then
+		win.openFlag = true
+	end
+end
+
+-- Text/TextDisabled/Separator have no label to derive a stable identity
+-- from, so they're named by their position in the draw order
+-- ("textd_3", "sep_7", ...). That's fine as long as the exact same
+-- widgets draw in the exact same order every frame — but a
+-- CollapsingHeader (or any other conditional content) breaks that:
+-- when it's collapsed vs expanded, the widgets AFTER it shift position,
+-- so they get a different name and a brand-new Instance is created
+-- instead of reusing the old one. The old one never gets removed on
+-- its own, so toggling things open/closed repeatedly piled up ghost
+-- duplicate Instances forever — this sweep is what actually removes
+-- them. Every widget function stamps its root Instance with the
+-- current frame number (see the SetAttribute("_imgui_f", ...) calls
+-- throughout); anything in win.baseBody carrying that attribute from
+-- an OLDER frame means it wasn't drawn this frame, so it's gone stale
+-- and gets destroyed.
+local function reapStaleWidgets(win)
+	for _, child in ipairs(win.baseBody:GetChildren()) do
+		local f = child:GetAttribute("_imgui_f")
+		if f ~= nil and f ~= ImGui._frame then
+			child:Destroy()
+		end
+	end
+end
+
+function ImGui.End()
+	local win = currentWindow()
+	if win then
+		reapStaleWidgets(win)
+	end
+	table.remove(WindowStack)
+end
+
+--========================================================================
+-- TABS
+--========================================================================
+
+local function createTabBar(win, id)
+	-- Outer container: NOT governed by any UIListLayout of its own, so
+	-- it can hold a full-width underline frame safely. This is what
+	-- gets the vertical LayoutOrder slot inside win.baseBody.
+	local tabBar = Instance.new("Frame")
+	tabBar.Name = "TabBar_" .. id
+	tabBar.BackgroundTransparency = 1
+	tabBar.Size = UDim2.new(1, 0, 0, Style.TabBarHeight)
+	tabBar.LayoutOrder = 1
+	tabBar.Parent = win.baseBody
+
+	-- The Separator line upstream draws under the whole tab bar. It
+	-- sits BEHIND every tab (ZIndex 0 vs tabs' default 1), so it's only
+	-- actually visible: (a) under inactive tabs, which paintTab() makes
+	-- TAB_BAR_GAP px short to expose it, and (b) in the empty stretch
+	-- of the bar past the last tab, same as upstream.
+	--
+	-- This MUST live directly in tabBar, not in tabButtonsRow below —
+	-- a Horizontal UIListLayout treats every child as a list item, so
+	-- a full-width (Size X scale = 1) sibling of the tab buttons gets
+	-- laid out AS a list item and claims the whole row's width for
+	-- itself, shoving the real tabs almost entirely off-screen. That
+	-- was the actual bug behind the broken-looking tab bar.
+	local underline = Instance.new("Frame")
+	underline.Name = "Underline"
+	underline.BackgroundColor3 = Style.Border
+	underline.BackgroundTransparency = Style.BorderTransparency
+	underline.BorderSizePixel = 0
+	underline.Size = UDim2.new(1, 0, 0, 1)
+	underline.Position = UDim2.new(0, 0, 1, -1)
+	underline.ZIndex = 0
+	underline.Parent = tabBar
+
+	-- Inner strip: ONLY the actual tab buttons live here, so the
+	-- horizontal UIListLayout only ever lays out real tabs.
+	local tabButtonsRow = Instance.new("Frame")
+	tabButtonsRow.Name = "TabButtons"
+	tabButtonsRow.BackgroundTransparency = 1
+	tabButtonsRow.Size = UDim2.new(1, 0, 1, 0)
+	tabButtonsRow.ZIndex = 1
+	tabButtonsRow.Parent = tabBar
+
+	local tabLayout = Instance.new("UIListLayout")
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	tabLayout.Padding = UDim.new(0, 2)
+	tabLayout.Parent = tabButtonsRow
+
+	local pages = Instance.new("Frame")
+	pages.Name = "TabPages_" .. id
+	pages.BackgroundTransparency = 1
+	pages.Size = UDim2.new(1, 0, 0, 0)
+	pages.AutomaticSize = Enum.AutomaticSize.Y
+	pages.LayoutOrder = 2
+	pages.Parent = win.baseBody
+
+	local pagesLayout = Instance.new("UIListLayout")
+	pagesLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	pagesLayout.Parent = pages
+
+	local state = {
+		id = id,
+		win = win,
+		tabBar = tabBar,               -- outer container (vertical LayoutOrder slot)
+		tabButtonsRow = tabButtonsRow, -- inner strip (parent for actual tab buttons)
+		pages = pages,
+		tabs = {},
+		tabsById = {},
+		selected = nil,
+	}
+
+	win.tabBars[id] = state
+
+	return state
+end
+
+local function getTabBar(win, id)
+	return win.tabBars[id] or createTabBar(win, id)
+end
+
+local function createTab(state, label)
+	local visible, id = splitLabel(label)
+	local win = state.win
+
+	local page = Instance.new("Frame")
+	page.Name = "Page_" .. id
+	page.BackgroundTransparency = 1
+	page.Size = UDim2.new(1, 0, 0, 0)
+	page.AutomaticSize = Enum.AutomaticSize.Y
+	page.Visible = false
+	page.LayoutOrder = #state.tabs + 1
+	page.Parent = state.pages
+
+	local pageLayout = Instance.new("UIListLayout")
+	pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	pageLayout.Padding = UDim.new(0, Style.ItemSpacingY)
+	pageLayout.Parent = page
+
+	local pagePadding = Instance.new("UIPadding")
+	pagePadding.PaddingTop = UDim.new(0, Style.WindowPaddingY)
+	pagePadding.PaddingBottom = UDim.new(0, Style.WindowPaddingY)
+	pagePadding.PaddingLeft = UDim.new(0, 0)
+	pagePadding.PaddingRight = UDim.new(0, 0)
+	pagePadding.Parent = page
+
+	-- Auto-width to fit the label (upstream sizes tabs to their text +
+	-- FramePadding.x*2, not a fixed box) with a sensible floor so a
+	-- one-letter tab isn't a sliver.
+	local button = Instance.new("TextButton")
+	button.Name = "Tab_" .. id
+	button.BackgroundColor3 = Style.Tab
+	button.BackgroundTransparency = Style.TabTransparency
+	button.BorderSizePixel = 0
+	button.AutomaticSize = Enum.AutomaticSize.X
+	button.Size = UDim2.new(0, 0, 1, 0)
+	button.Font = Style.Font
+	button.TextSize = Style.TextSize
+	button.TextColor3 = Style.Text
+	button.Text = visible
+	button.AutoButtonColor = false
+	button.LayoutOrder = #state.tabs + 1
+	button.ClipsDescendants = false
+	button.Parent = state.tabButtonsRow
+
+	local btnSizeConstraint = Instance.new("UISizeConstraint")
+	btnSizeConstraint.MinSize = Vector2.new(40, 0)
+	btnSizeConstraint.Parent = button
+
+	-- Upstream pads each side by FramePadding.x (not *2) — the previous
+	-- version doubled this, which made every tab noticeably wider/
+	-- puffier than real ImGui.
+	local btnPadding = Instance.new("UIPadding")
+	btnPadding.PaddingLeft = UDim.new(0, Style.FramePaddingX)
+	btnPadding.PaddingRight = UDim.new(0, Style.FramePaddingX)
+	btnPadding.Parent = button
+
+	-- Top corners rounded (TabRounding), bottom squared off via mask —
+	-- matches upstream's top-rounded/bottom-flush tab shape. The mask
+	-- is re-colored every paintTab() call below (it was previously
+	-- frozen at creation time, leaving a visible two-tone seam at the
+	-- bottom of active/hovered tabs — that was the main thing making
+	-- these look off).
+	corner(button, Style.TabRounding)
+	local mask = squareBottomMask(button, Style.Tab, Style.TabTransparency, 4)
+
+	local tab = {
+		id = id,
+		label = visible,
+		page = page,
+		button = button,
+		mask = mask,
+		hovered = false,
+	}
+
+	button.MouseEnter:Connect(function()
+		tab.hovered = true
+		paintTab(tab, state, win.titleFocused)
+	end)
+
+	button.MouseLeave:Connect(function()
+		tab.hovered = false
+		paintTab(tab, state, win.titleFocused)
+	end)
+
+	button.MouseButton1Click:Connect(function()
+		state.selected = id
+		updateTabVisuals(state, win.titleFocused)
+	end)
+
+	table.insert(state.tabs, tab)
+	state.tabsById[id] = tab
+
+	if not state.selected then
+		state.selected = id
+	end
+
+	return tab
+end
+
+function ImGui.BeginTabBar(id)
+	local win = currentWindow()
+
+	if not win then
+		return false
+	end
+
+	win.body = win.baseBody
+
+	local state = getTabBar(win, id)
+
+	win.activeTabBar = state
+	win.nextOrder = 0
+
+	state.tabBar.LayoutOrder = nextOrder()
+	state.pages.LayoutOrder = nextOrder()
+
+	updateTabVisuals(state, win.titleFocused)
+
+	return true
+end
+
+function ImGui.BeginTabItem(label)
+	local win = currentWindow()
+
+	if not win or not win.activeTabBar then
+		return false
+	end
+
+	local state = win.activeTabBar
+	local visible, id = splitLabel(label)
+
+	local tab = state.tabsById[id]
+
+	if not tab then
+		tab = createTab(state, label)
+		updateTabVisuals(state, win.titleFocused)
+	end
+
+	if state.selected ~= id then
+		return false
+	end
+
+	win.body = tab.page
+	win.nextOrder = 0
+	win.activeTabPage = tab.page
+
+	return true
+end
+
+function ImGui.EndTabItem()
+	local win = currentWindow()
+
+	if not win then
+		return
+	end
+
+	win.body = win.baseBody
+	win.activeTabPage = nil
+end
+
+function ImGui.EndTabBar()
+	local win = currentWindow()
+
+	if not win then
+		return
+	end
+
+	win.body = win.baseBody
+	win.activeTabBar = nil
+	win.activeTabPage = nil
+end
+
+--========================================================================
+-- FRAME LIFECYCLE
+--========================================================================
+
+ImGui._frame = 0
+
+function ImGui.NewFrame()
+	ImGui._frame = ImGui._frame + 1
+end
+
+function ImGui.EndFrame()
+	for _, win in pairs(Windows) do
+		if win.root then
+			win.root.Visible =
+				(win.lastSeenFrame == ImGui._frame)
+				and win.openFlag
+		end
+	end
+end
+
+--========================================================================
+-- TEXT
+--========================================================================
+
+function ImGui.Text(text)
+	local win = currentWindow()
+	local order = nextOrder()
+	local id = "text_" .. order
+
+	local lbl = win.body:FindFirstChild(id)
+
+	if not lbl then
+		lbl = Instance.new("TextLabel")
+		lbl.Name = id
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(1, 0, 0, 18)
+		lbl.Font = Style.Font
+		lbl.TextSize = Style.TextSize
+		lbl.TextColor3 = Style.Text
+		lbl.TextTransparency = Style.TextTransparency
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.TextWrapped = true
+		lbl.AutomaticSize = Enum.AutomaticSize.Y
+		lbl.Parent = win.body
+	end
+
+	lbl.LayoutOrder = order
+	lbl:SetAttribute("_imgui_f", ImGui._frame)
+	lbl.Text = text
+end
+
+function ImGui.TextDisabled(text)
+	local win = currentWindow()
+	local order = nextOrder()
+	local id = "textd_" .. order
+
+	local lbl = win.body:FindFirstChild(id)
+
+	if not lbl then
+		lbl = Instance.new("TextLabel")
+		lbl.Name = id
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(1, 0, 0, 18)
+		lbl.Font = Style.Font
+		lbl.TextSize = Style.TextSize
+		lbl.TextColor3 = Style.TextDisabled
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.TextWrapped = true
+		lbl.AutomaticSize = Enum.AutomaticSize.Y
+		lbl.Parent = win.body
+	end
+
+	lbl.LayoutOrder = order
+	lbl:SetAttribute("_imgui_f", ImGui._frame)
+	lbl.Text = text
+end
+
+--========================================================================
+-- BUTTON
+--========================================================================
+
+function ImGui.Button(label, opts)
+	opts = opts or {}
+
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "btn_" .. id
+
+	local state = getState(scopedId(win, id), {
+		clicked = false,
+		hovered = false,
+		down = false,
+	})
+
+	local btn = win.body:FindFirstChild(name)
+
+	if not btn then
+		btn = Instance.new("TextButton")
+		btn.Name = name
+		btn.AutoButtonColor = false
+		btn.Size = UDim2.new(1, 0, 0, opts.h or Style.FrameHeight)
+		btn.Font = Style.Font
+		btn.TextSize = Style.TextSize
+		btn.TextColor3 = Style.Text
+		btn.TextTransparency = Style.TextTransparency
+		btn.Parent = win.body
+
+		corner(btn, Style.FrameRounding)
+
+		btn.MouseEnter:Connect(function()
+			state.hovered = true
+		end)
+
+		btn.MouseLeave:Connect(function()
+			state.hovered = false
+		end)
+
+		btn.MouseButton1Down:Connect(function()
+			state.down = true
+		end)
+
+		btn.MouseButton1Up:Connect(function()
+			state.down = false
+		end)
+
+		btn.MouseButton1Click:Connect(function()
+			state.clicked = true
+		end)
+	end
+
+	btn.LayoutOrder = order
+	btn:SetAttribute("_imgui_f", ImGui._frame)
+	btn.Text = visible
+
+	if state.down then
+		btn.BackgroundColor3 = Style.ButtonActive
+		btn.BackgroundTransparency = Style.ButtonActiveTransparency
+	elseif state.hovered then
+		btn.BackgroundColor3 = Style.ButtonHovered
+		btn.BackgroundTransparency = Style.ButtonHoveredTransparency
+	else
+		btn.BackgroundColor3 = Style.Button
+		btn.BackgroundTransparency = Style.ButtonTransparency
+	end
+
+	local wasClicked = state.clicked
+	state.clicked = false
+
+	return wasClicked
+end
+
+--========================================================================
+-- COLLAPSING HEADER
+--========================================================================
+
+-- Matches upstream's actual usage pattern: a full-width clickable row
+-- with an arrow that flips between ▸ (closed) and ▾ (open), painted
+-- with the same Header/HeaderHovered/HeaderActive colors as a Tab or a
+-- Combo's selected row — this is the widget behind the "▶ Help",
+-- "▶ Configuration" etc. rows in the real ImGui demo. Returns whether
+-- it's currently open; the caller wraps their own content in the if:
+--   if ImGui.CollapsingHeader("Help") then
+--       ImGui.Text("...")
+--   end
+function ImGui.CollapsingHeader(label, defaultOpen)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "hdr_" .. id
+
+	local state = getState(scopedId(win, id), {
+		open = defaultOpen or false,
+		hovered = false,
+		down = false,
+	})
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("TextButton")
+		row.Name = name
+		row.AutoButtonColor = false
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Text = ""
+		row.Parent = win.body
+		corner(row, Style.FrameRounding)
+
+		-- Uses the SAME image asset as the window's own collapse
+		-- button (COLLAPSE_ICON), instead of a Unicode ▾/▸ text glyph
+		-- like before. Roblox's built-in fonts frequently don't
+		-- include triangle/symbol glyphs, so that rendered as nothing
+		-- — this is a real, proven-working asset instead.
+		local arrow = Instance.new("ImageLabel")
+		arrow.Name = "Arrow"
+		arrow.BackgroundTransparency = 1
+		arrow.Size = UDim2.fromOffset(12, 12)
+		arrow.Position = UDim2.new(0, 8, 0.5, -6)
+		arrow.Image = COLLAPSE_ICON
+		arrow.ImageColor3 = Style.Text
+		arrow.ImageTransparency = Style.TextTransparency
+		arrow.ScaleType = Enum.ScaleType.Fit
+		-- -90 when OPEN, 0 when collapsed/idle (flipped from the first
+		-- version per feedback — this now matches what reads correctly
+		-- here, even though it's the opposite mapping the window's own
+		-- collapse button uses). Snapped once at creation to match
+		-- defaultOpen; after this, only the tween below ever moves it.
+		arrow.Rotation = state.open and -90 or 0
+		arrow.Parent = row
+
+		local text = Instance.new("TextLabel")
+		text.Name = "Label"
+		text.BackgroundTransparency = 1
+		text.Position = UDim2.fromOffset(26, 0)
+		text.Size = UDim2.new(1, -30, 1, 0)
+		text.Font = Style.FontBold
+		text.TextSize = Style.TextSize
+		text.TextColor3 = Style.Text
+		text.TextTransparency = Style.TextTransparency
+		text.TextXAlignment = Enum.TextXAlignment.Left
+		text.Parent = row
+
+		-- Same tween as the window's own animateCollapseIcon (0.16s,
+		-- Quad, EasingDirection.Out) — the tween reference lives in
+		-- `state` (a plain Lua table from getState), not on the
+		-- Instance itself, same reason as the earlier _popup/_recompute
+		-- fix: Roblox Instances don't allow arbitrary custom fields.
+		local function animateArrow()
+			if state.arrowTween then
+				state.arrowTween:Cancel()
+				state.arrowTween = nil
+			end
+			local targetRotation = state.open and -90 or 0
+			local tween = TweenService:Create(
+				arrow,
+				TweenInfo.new(COLLAPSE_ANIMATION_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Rotation = targetRotation }
+			)
+			state.arrowTween = tween
+			tween:Play()
+		end
+
+		row.MouseEnter:Connect(function() state.hovered = true end)
+		row.MouseLeave:Connect(function() state.hovered = false end)
+		row.MouseButton1Down:Connect(function() state.down = true end)
+		row.MouseButton1Up:Connect(function() state.down = false end)
+		row.MouseButton1Click:Connect(function()
+			state.open = not state.open
+			animateArrow()
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Label.Text = visible
+	-- Rotation is NOT set here every frame anymore — the tween above
+	-- owns it now. Setting it unconditionally every frame would snap
+	-- it back instantly and fight the animation, defeating the tween
+	-- entirely.
+
+	if state.down then
+		row.BackgroundColor3 = Style.HeaderActive
+		row.BackgroundTransparency = Style.HeaderActiveTransparency
+	elseif state.hovered then
+		row.BackgroundColor3 = Style.HeaderHovered
+		row.BackgroundTransparency = Style.HeaderHoveredTransparency
+	else
+		row.BackgroundColor3 = Style.Header
+		row.BackgroundTransparency = Style.HeaderTransparency
+	end
+
+	return state.open
+end
+
+--========================================================================
+-- CHECKBOX
+--========================================================================
+
+function ImGui.Checkbox(label, value)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "chk_" .. id
+
+	local state = getState(scopedId(win, id), {
+		value = value,
+		hovered = false,
+	})
+
+	if value ~= nil and state.value == nil then
+		state.value = value
+	end
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("TextButton")
+		row.Name = name
+		row.AutoButtonColor = false
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Text = ""
+		row.Parent = win.body
+
+		-- Upstream ties the checkbox box size directly to
+		-- GetFrameHeight() (same formula as every other frame widget),
+		-- not an unrelated hardcoded 18px square.
+		local box = Instance.new("Frame")
+		box.Name = "Box"
+		box.Size = UDim2.fromOffset(Style.FrameHeight, Style.FrameHeight)
+		box.Position = UDim2.new(0, 0, 0.5, -Style.FrameHeight / 2)
+		box.BackgroundColor3 = Style.FrameBg
+		box.BackgroundTransparency = Style.FrameBgTransparency
+		box.Parent = row
+
+		corner(box, Style.FrameRounding)
+
+		-- Image checkmark. Scaled to 140% of the box (not 100%) because
+		-- the icon asset itself has transparent padding baked in, so a
+		-- 1:1 fit reads as a small checkmark floating in a big box —
+		-- this compensates. AnchorPoint+Position keep it centered, and
+		-- the box has no ClipsDescendants so the slight overscale is
+		-- never cut off.
+		local check = Instance.new("ImageLabel")
+		check.Name = "Check"
+		check.AnchorPoint = Vector2.new(0.5, 0.5)
+		check.Position = UDim2.fromScale(0.5, 0.5)
+		check.Size = UDim2.fromScale(1.4, 1.4)
+		check.BackgroundTransparency = 1
+		check.Image = CHECKMARK_ICON
+		check.ImageColor3 = Style.CheckMark
+		check.ImageTransparency = Style.CheckMarkTransparency
+		check.ScaleType = Enum.ScaleType.Fit
+		check.Visible = false
+		check.Parent = box
+
+		local text = Instance.new("TextLabel")
+		text.Name = "Label"
+		text.BackgroundTransparency = 1
+		text.Position = UDim2.fromOffset(26, 0)
+		text.Size = UDim2.new(1, -26, 1, 0)
+		text.Font = Style.Font
+		text.TextSize = Style.TextSize
+		text.TextColor3 = Style.Text
+		text.TextTransparency = Style.TextTransparency
+		text.TextXAlignment = Enum.TextXAlignment.Left
+		text.Parent = row
+
+		row.MouseEnter:Connect(function()
+			box.BackgroundColor3 = Style.FrameBgHovered
+			box.BackgroundTransparency = Style.FrameBgHoveredTransparency
+		end)
+
+		row.MouseLeave:Connect(function()
+			box.BackgroundColor3 = Style.FrameBg
+			box.BackgroundTransparency = Style.FrameBgTransparency
+		end)
+
+		row.MouseButton1Click:Connect(function()
+			state.value = not state.value
+			state.changed = true
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Box.Check.Visible = state.value
+	row.Box.Check.ImageColor3 = Style.CheckMark
+	row.Label.Text = visible
+
+	local changed = state.changed or false
+	state.changed = false
+
+	return changed, state.value
+end
+
+--========================================================================
+-- RADIO BUTTON
+--========================================================================
+
+-- Matches upstream's actual signature exactly: bool RadioButton(label,
+-- bool active) -> clicked. You call it once per option in a group and
+-- drive the group's selection yourself, e.g.:
+--   if ImGui.RadioButton("Easy", difficulty == 1) then difficulty = 1 end
+--   if ImGui.RadioButton("Hard", difficulty == 2) then difficulty = 2 end
+-- Upstream reuses ImGuiCol_CheckMark for the filled dot (not a separate
+-- "radio" color) — same here.
+function ImGui.RadioButton(label, active)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "radio_" .. id
+
+	local state = getState(scopedId(win, id), {
+		clicked = false,
+	})
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("TextButton")
+		row.Name = name
+		row.AutoButtonColor = false
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Text = ""
+		row.Parent = win.body
+
+		-- Same FrameHeight-derived size as Checkbox's box, for
+		-- consistency between the two "toggle" widgets.
+		local ring = Instance.new("Frame")
+		ring.Name = "Ring"
+		ring.Size = UDim2.fromOffset(Style.FrameHeight, Style.FrameHeight)
+		ring.Position = UDim2.new(0, 0, 0.5, -Style.FrameHeight / 2)
+		ring.BackgroundColor3 = Style.FrameBg
+		ring.BackgroundTransparency = Style.FrameBgTransparency
+		ring.Parent = row
+
+		local ringCorner = Instance.new("UICorner")
+		ringCorner.CornerRadius = UDim.new(1, 0) -- full circle, unlike square FrameRounding=0 elsewhere
+		ringCorner.Parent = ring
+
+		local dot = Instance.new("Frame")
+		dot.Name = "Dot"
+		dot.AnchorPoint = Vector2.new(0.5, 0.5)
+		dot.Position = UDim2.fromScale(0.5, 0.5)
+		dot.Size = UDim2.fromOffset(9, 9)
+		dot.BackgroundColor3 = Style.CheckMark
+		dot.BackgroundTransparency = Style.CheckMarkTransparency
+		dot.Visible = false
+		dot.Parent = ring
+
+		local dotCorner = Instance.new("UICorner")
+		dotCorner.CornerRadius = UDim.new(1, 0)
+		dotCorner.Parent = dot
+
+		local text = Instance.new("TextLabel")
+		text.Name = "Label"
+		text.BackgroundTransparency = 1
+		text.Position = UDim2.fromOffset(26, 0)
+		text.Size = UDim2.new(1, -26, 1, 0)
+		text.Font = Style.Font
+		text.TextSize = Style.TextSize
+		text.TextColor3 = Style.Text
+		text.TextTransparency = Style.TextTransparency
+		text.TextXAlignment = Enum.TextXAlignment.Left
+		text.Parent = row
+
+		row.MouseEnter:Connect(function()
+			ring.BackgroundColor3 = Style.FrameBgHovered
+			ring.BackgroundTransparency = Style.FrameBgHoveredTransparency
+		end)
+
+		row.MouseLeave:Connect(function()
+			ring.BackgroundColor3 = Style.FrameBg
+			ring.BackgroundTransparency = Style.FrameBgTransparency
+		end)
+
+		row.MouseButton1Click:Connect(function()
+			state.clicked = true
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Ring.Dot.Visible = active
+	row.Label.Text = visible
+
+	local clicked = state.clicked
+	state.clicked = false
+
+	return clicked
+end
+
+--========================================================================
+-- PROGRESS BAR
+--========================================================================
+
+-- ImGui.ProgressBar(fraction, overlayText?) — fraction is clamped 0..1.
+-- Upstream: void ProgressBar(float fraction, ImVec2 size, const char*
+-- overlay). No return value — it's a pure display widget, not an input.
+function ImGui.ProgressBar(fraction, overlayText)
+	local win = currentWindow()
+	local order = nextOrder()
+	local name = "prog_" .. order
+
+	fraction = math.clamp(fraction, 0, 1)
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = name
+		row.BackgroundColor3 = Style.FrameBg
+		row.BackgroundTransparency = Style.FrameBgTransparency
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Parent = win.body
+
+		corner(row, Style.FrameRounding)
+
+		local fill = Instance.new("Frame")
+		fill.Name = "Fill"
+		fill.BackgroundColor3 = Style.PlotHistogram
+		fill.BackgroundTransparency = Style.PlotHistogramTransparency
+		fill.BorderSizePixel = 0
+		fill.Size = UDim2.new(0, 0, 1, 0)
+		fill.ZIndex = 2
+		fill.Parent = row
+
+		corner(fill, Style.FrameRounding)
+
+		local text = Instance.new("TextLabel")
+		text.Name = "Overlay"
+		text.BackgroundTransparency = 1
+		text.Size = UDim2.new(1, 0, 1, 0)
+		text.Font = Style.Font
+		text.TextSize = Style.TextSize
+		text.TextColor3 = Style.Text
+		text.TextTransparency = Style.TextTransparency
+		text.TextXAlignment = Enum.TextXAlignment.Center
+		text.ZIndex = 3
+		text.Parent = row
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Fill.Size = UDim2.new(fraction, 0, 1, 0)
+	row.Overlay.Text = overlayText or string.format("%d%%", math.floor(fraction * 100 + 0.5))
+end
+
+--========================================================================
+-- SLIDERS
+--========================================================================
+
+local function sliderCore(id, win, order, label, value, min, max, fmt, isInt)
+	local name = "sld_" .. id
+
+	local state = getState(scopedId(win, id), {
+		value = value,
+		dragging = false,
+	})
+
+	if state.value == nil then
+		state.value = value
+	end
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = name
+		row.BackgroundColor3 = Style.FrameBg
+		row.BackgroundTransparency = Style.FrameBgTransparency
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Parent = win.body
+
+		corner(row, Style.FrameRounding)
+
+		local grab = Instance.new("Frame")
+		grab.Name = "Grab"
+		grab.BackgroundColor3 = Style.SliderGrab
+		grab.BackgroundTransparency = Style.SliderGrabTransparency
+		grab.BorderSizePixel = 0
+		grab.Size = UDim2.fromOffset(
+			Style.GrabMinSize,
+			Style.FrameHeight - 4
+		)
+		grab.Position = UDim2.new(
+			0, 0,
+			0.5, -(Style.FrameHeight - 4) / 2
+		)
+		grab.ZIndex = 2
+		grab.Parent = row
+
+		corner(grab, Style.GrabRounding)
+
+		local text = Instance.new("TextLabel")
+		text.Name = "Label"
+		text.BackgroundTransparency = 1
+		text.Size = UDim2.new(1, -12, 1, 0)
+		text.Position = UDim2.fromOffset(6, 0)
+		text.Font = Style.Font
+		text.TextSize = Style.TextSize
+		text.TextColor3 = Style.Text
+		text.TextTransparency = Style.TextTransparency
+		text.TextXAlignment = Enum.TextXAlignment.Center
+		text.ZIndex = 3
+		text.Parent = row
+
+		local dragRegion = Instance.new("TextButton")
+		dragRegion.Name = "DragRegion"
+		dragRegion.BackgroundTransparency = 1
+		dragRegion.Text = ""
+		dragRegion.Size = UDim2.new(1, 0, 1, 0)
+		dragRegion.ZIndex = 4
+		dragRegion.Parent = row
+
+		local function setFromX(xPos)
+			local width = row.AbsoluteSize.X
+
+			if width <= 0 then
+				return
+			end
+
+			local rel = math.clamp(
+				(xPos - row.AbsolutePosition.X) / width,
+				0,
+				1
+			)
+
+			local raw = min + (max - min) * rel
+
+			if isInt then
+				raw = math.floor(raw + 0.5)
+			end
+
+			state.value = raw
+			state.changed = true
+		end
+
+		dragRegion.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+
+				state.dragging = true
+				setFromX(input.Position.X)
+			end
+		end)
+
+		UserInputService.InputChanged:Connect(function(input)
+			if state.dragging and (
+				input.UserInputType == Enum.UserInputType.MouseMovement
+					or input.UserInputType == Enum.UserInputType.Touch
+				) then
+				setFromX(input.Position.X)
+			end
+		end)
+
+		UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+
+				state.dragging = false
+			end
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+
+	local rel = (max > min)
+		and (state.value - min) / (max - min)
+		or 0
+
+	rel = math.clamp(rel, 0, 1)
+
+	local travel = row.AbsoluteSize.X > 0
+		and (row.AbsoluteSize.X - Style.GrabMinSize)
+		or 0
+
+	row.Grab.Position = UDim2.new(
+		0,
+		rel * travel,
+		0.5,
+		-(Style.FrameHeight - 4) / 2
+	)
+
+	row.Grab.BackgroundColor3 = state.dragging
+		and Style.SliderGrabActive
+		or Style.SliderGrab
+
+	row.Grab.BackgroundTransparency = state.dragging
+		and Style.SliderGrabActiveTransparency
+		or Style.SliderGrabTransparency
+
+	row.Label.Text = label .. ": " .. string.format(fmt, state.value)
+
+	local changed = state.changed or false
+	state.changed = false
+
+	return changed, state.value
+end
+
+function ImGui.SliderFloat(label, value, min, max, fmt)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+
+	return sliderCore(
+		id,
+		win,
+		order,
+		visible,
+		value,
+		min,
+		max,
+		fmt or "%.2f",
+		false
+	)
+end
+
+function ImGui.SliderInt(label, value, min, max)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+
+	return sliderCore(
+		id,
+		win,
+		order,
+		visible,
+		value,
+		min,
+		max,
+		"%d",
+		true
+	)
+end
+
+--========================================================================
+-- INPUT TEXT
+--========================================================================
+
+-- Shared by InputText and InputTextWithHint below. `hint`, when given,
+-- shows as faint placeholder text (via Roblox's native
+-- TextBox.PlaceholderText) that disappears the moment you click in or
+-- type — it is NEVER real committed text sitting in the box. This is
+-- what upstream's actual InputTextWithHint() does too (hint and value
+-- are two separate things there as well, not one field doing double
+-- duty) — InputText (no hint) just leaves PlaceholderText empty.
+local function inputTextCore(label, hint, value)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "inp_" .. id
+
+	local state = getState(scopedId(win, id), {
+		value = value or "",
+	})
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = name
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.Parent = win.body
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Name = "Label"
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(0.4, -4, 1, 0)
+		lbl.Font = Style.Font
+		lbl.TextSize = Style.TextSize
+		lbl.TextColor3 = Style.TextDisabled
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = row
+
+		local box = Instance.new("TextBox")
+		box.Name = "Box"
+		box.Position = UDim2.new(0.4, 0, 0, 0)
+		box.Size = UDim2.new(0.6, 0, 1, 0)
+		box.BackgroundColor3 = Style.FrameBg
+		box.BackgroundTransparency = Style.FrameBgTransparency
+		box.Font = Style.Font
+		box.TextSize = Style.TextSize
+		box.TextColor3 = Style.Text
+		box.TextTransparency = Style.TextTransparency
+		box.PlaceholderText = hint or ""
+		box.PlaceholderColor3 = Style.TextDisabled
+		box.ClearTextOnFocus = false
+		box.Parent = row
+
+		corner(box, Style.FrameRounding)
+
+		box.Focused:Connect(function()
+			box.BackgroundColor3 = Style.FrameBgActive
+			box.BackgroundTransparency = Style.FrameBgActiveTransparency
+		end)
+
+		box.FocusLost:Connect(function()
+			box.BackgroundColor3 = Style.FrameBg
+			box.BackgroundTransparency = Style.FrameBgTransparency
+			state.value = box.Text
+			state.changed = true
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Label.Text = visible
+	row.Box.PlaceholderText = hint or "" -- re-applied every frame in case the caller passes a dynamic hint
+
+	if not row.Box:IsFocused() then
+		row.Box.Text = state.value
+	end
+
+	local changed = state.changed or false
+	state.changed = false
+
+	return changed, state.value
+end
+
+-- ImGui.InputText(label, value) -> changed, value
+-- No hint — the box starts genuinely empty unless `value` is already
+-- non-empty (e.g. restoring a previously-typed value).
+function ImGui.InputText(label, value)
+	return inputTextCore(label, nil, value)
+end
+
+-- ImGui.InputTextWithHint(label, hint, value) -> changed, value
+-- `hint` is faint placeholder text shown only while the box is empty;
+-- it is never inserted into the actual value.
+function ImGui.InputTextWithHint(label, hint, value)
+	return inputTextCore(label, hint, value)
+end
+
+--========================================================================
+-- COMBO
+--========================================================================
+
+-- Repaints one option row's background to match its current selected /
+-- hovered state. Pulled out so both the create-time initial paint and
+-- the MouseEnter/MouseLeave handlers can share one code path.
+local function paintComboOption(opt, selected, hovered)
+	if selected then
+		opt.BackgroundColor3 = Style.HeaderActive
+		opt.BackgroundTransparency = Style.HeaderActiveTransparency
+	elseif hovered then
+		opt.BackgroundColor3 = Style.HeaderHovered
+		opt.BackgroundTransparency = Style.HeaderHoveredTransparency
+	else
+		opt.BackgroundTransparency = 1
+	end
+end
+
+function ImGui.Combo(label, items, currentIndex)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "cmb_" .. id
+
+	local state = getState(scopedId(win, id), {
+		index = currentIndex or 1,
+		open = false,
+		-- Persistent option-button cache, keyed by index — a plain Lua
+		-- table (NOT stored on any Instance; Roblox Instances don't
+		-- allow arbitrary custom fields, same lesson as the earlier
+		-- _popup/_recompute bug). Each entry is {button, hovered}.
+		options = {},
+	})
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = name
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.ClipsDescendants = false
+		-- Bumped well above any plausible sibling widget's ZIndex (was
+		-- 5, barely above a default of 1) so the open popup is never
+		-- ambiguous about rendering/input priority over nearby widgets.
+		row.ZIndex = 50
+		row.Parent = win.body
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Name = "Label"
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(0.4, -4, 1, 0)
+		lbl.Font = Style.Font
+		lbl.TextSize = Style.TextSize
+		lbl.TextColor3 = Style.TextDisabled
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = row
+
+		local box = Instance.new("TextButton")
+		box.Name = "Box"
+		box.AutoButtonColor = false
+		box.Position = UDim2.new(0.4, 0, 0, 0)
+		box.Size = UDim2.new(0.6, 0, 1, 0)
+		box.BackgroundColor3 = Style.FrameBg
+		box.BackgroundTransparency = Style.FrameBgTransparency
+		box.Font = Style.Font
+		box.TextSize = Style.TextSize
+		box.TextColor3 = Style.Text
+		box.TextTransparency = Style.TextTransparency
+		box.TextXAlignment = Enum.TextXAlignment.Left -- was defaulting to Center, unlike every other frame widget's text
+		box.Parent = row
+
+		corner(box, Style.FrameRounding)
+		stroke(box, Style.Border, Style.BorderTransparency, 1)
+
+		local boxPadding = Instance.new("UIPadding")
+		boxPadding.PaddingLeft = UDim.new(0, Style.FramePaddingX + 2)
+		boxPadding.PaddingRight = UDim.new(0, 20) -- room for the arrow so long option text doesn't run under it
+		boxPadding.Parent = box
+
+		-- box previously had no hover feedback at all — unlike every
+		-- other frame widget (Button, Checkbox, sliders, InputText),
+		-- it just sat static. Now it lightens the same way they do.
+		box.MouseEnter:Connect(function()
+			box.BackgroundColor3 = Style.FrameBgHovered
+			box.BackgroundTransparency = Style.FrameBgHoveredTransparency
+		end)
+		box.MouseLeave:Connect(function()
+			box.BackgroundColor3 = Style.FrameBg
+			box.BackgroundTransparency = Style.FrameBgTransparency
+		end)
+
+		-- Same image asset + tween as the window's own collapse button
+		-- and CollapsingHeader (was a Unicode ▼ glyph, then a plain
+		-- geometric chevron — neither matched the rest of the library's
+		-- collapse affordances, so this now does exactly what was
+		-- asked: "add the collapsing icon to it and its tween").
+		local arrow = Instance.new("ImageLabel")
+		arrow.Name = "Arrow"
+		arrow.BackgroundTransparency = 1
+		arrow.AnchorPoint = Vector2.new(1, 0.5)
+		arrow.Position = UDim2.new(1, -8, 0.5, -6)
+		arrow.Size = UDim2.fromOffset(12, 12)
+		arrow.Image = COLLAPSE_ICON
+		arrow.ImageColor3 = Style.TextDisabled
+		arrow.ImageTransparency = 0
+		arrow.ScaleType = Enum.ScaleType.Fit
+		-- Same convention as CollapsingHeader: -90 open, 0 closed/idle.
+		arrow.Rotation = state.open and -90 or 0
+		arrow.ZIndex = 2
+		arrow.Parent = box
+
+		local function animateArrow()
+			if state.arrowTween then
+				state.arrowTween:Cancel()
+				state.arrowTween = nil
+			end
+			local targetRotation = state.open and -90 or 0
+			local tween = TweenService:Create(
+				arrow,
+				TweenInfo.new(COLLAPSE_ANIMATION_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Rotation = targetRotation }
+			)
+			state.arrowTween = tween
+			tween:Play()
+		end
+
+		local list = Instance.new("Frame")
+		list.Name = "List"
+		list.BackgroundColor3 = Style.PopupBg
+		list.BackgroundTransparency = Style.PopupBgTransparency
+		list.Position = UDim2.new(0.4, 0, 1, 2)
+		list.Size = UDim2.new(0.6, 0, 0, 0)
+		list.AutomaticSize = Enum.AutomaticSize.Y
+		list.Visible = false
+		list.ZIndex = 60
+		list.Parent = row
+
+		stroke(list, Style.Border, Style.BorderTransparency, 1)
+
+		local listLayout = Instance.new("UIListLayout")
+		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		listLayout.Parent = list
+
+		local listPadding = Instance.new("UIPadding")
+		listPadding.PaddingTop = UDim.new(0, 2)
+		listPadding.PaddingBottom = UDim.new(0, 2)
+		listPadding.Parent = list
+
+		box.MouseButton1Click:Connect(function()
+			state.open = not state.open
+			animateArrow()
+		end)
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Label.Text = visible
+	row.Box.Text = items[state.index] or "..."
+	row.List.Visible = state.open
+
+	-- Options are created ONCE per index and reused every frame from
+	-- here on — they used to be destroyed and fully recreated on every
+	-- single call (i.e. every frame), which is why hover highlighting
+	-- never stuck (MouseEnter doesn't fire just because a brand-new
+	-- Instance happens to appear under an already-stationary cursor)
+	-- and clicks could get silently dropped (destroying a TextButton
+	-- mid MouseButton1Down/Up pair cancels the click). This is the
+	-- actual root cause of "no hover" and "can't select" — now fixed.
+	for i, item in ipairs(items) do
+		local entry = state.options[i]
+
+		if not entry then
+			local opt = Instance.new("TextButton")
+			opt.AutoButtonColor = false
+			opt.Size = UDim2.new(1, 0, 0, 24)
+			opt.Font = Style.Font
+			opt.TextSize = Style.TextSize
+			opt.TextColor3 = Style.Text
+			opt.TextXAlignment = Enum.TextXAlignment.Left
+			opt.LayoutOrder = i
+			opt.ZIndex = 61
+			opt.Parent = row.List
+
+			local optPadding = Instance.new("UIPadding")
+			optPadding.PaddingLeft = UDim.new(0, Style.FramePaddingX + 2)
+			optPadding.Parent = opt
+
+			entry = { button = opt, hovered = false }
+			state.options[i] = entry
+
+			opt.MouseEnter:Connect(function()
+				entry.hovered = true
+				paintComboOption(opt, state.index == i, true)
+			end)
+			opt.MouseLeave:Connect(function()
+				entry.hovered = false
+				paintComboOption(opt, state.index == i, false)
+			end)
+			opt.MouseButton1Click:Connect(function()
+				state.index = i
+				state.open = false
+				state.changed = true
+			end)
+		end
+
+		entry.button.Text = item
+		paintComboOption(entry.button, state.index == i, entry.hovered)
+	end
+
+	-- If the caller ever passes a SHORTER items list than before,
+	-- remove the now-unused trailing cached option buttons rather than
+	-- leaving stale ones sitting in the popup forever.
+	for i = #items + 1, #state.options do
+		if state.options[i] then
+			state.options[i].button:Destroy()
+			state.options[i] = nil
+		end
+	end
+
+	local changed = state.changed or false
+	state.changed = false
+
+	return changed, state.index
+end
+
+--========================================================================
+-- COLOR EDIT
+--========================================================================
+
+local function colorToHex(c)
+	return string.format(
+		"#%02X%02X%02X",
+		math.floor(c.R * 255 + 0.5),
+		math.floor(c.G * 255 + 0.5),
+		math.floor(c.B * 255 + 0.5)
+	)
+end
+
+-- One Hue/Saturation/Value bar: a gradient-filled track with a thin
+-- draggable indicator. Used three times below (once per channel) —
+-- each instance's gradient is recomputed by the caller whenever any of
+-- h/s/v changes, since e.g. the Saturation bar's endpoint colors
+-- depend on the CURRENT Hue and Value, not just on Saturation itself.
+local function createHSVBar(parent, order)
+	local bar = Instance.new("Frame")
+	bar.Name = "Bar"
+	bar.LayoutOrder = order
+	bar:SetAttribute("_imgui_f", ImGui._frame)
+	bar.Size = UDim2.new(1, 0, 0, 16)
+	bar.BackgroundColor3 = Color3.new(1, 1, 1)
+	bar.BorderSizePixel = 0
+	bar.Parent = parent
+	corner(bar, UDim.new(0, 2))
+
+	local gradient = Instance.new("UIGradient")
+	gradient.Parent = bar
+
+	local indicator = Instance.new("Frame")
+	indicator.Name = "Indicator"
+	indicator.AnchorPoint = Vector2.new(0.5, 0)
+	indicator.Size = UDim2.new(0, 2, 1, 0)
+	indicator.BackgroundColor3 = Color3.new(1, 1, 1)
+	indicator.BorderSizePixel = 0
+	indicator.ZIndex = 2
+	indicator.Parent = bar
+	stroke(indicator, Color3.new(0, 0, 0), 0, 1) -- thin dark outline so it's visible over light gradient regions too
+
+	local hit = Instance.new("TextButton")
+	hit.Name = "Hit"
+	hit.BackgroundTransparency = 1
+	hit.AutoButtonColor = false
+	hit.Text = ""
+	hit.Size = UDim2.new(1, 0, 1, 0)
+	hit.ZIndex = 3
+	hit.Parent = bar
+
+	return bar, gradient, indicator, hit
+end
+
+-- A real HSV picker popup, replacing the old "cycle through 7 presets"
+-- placeholder — click the swatch to open it, drag any of the three
+-- bars for continuous color selection, read the hex value at the
+-- bottom. No free-text hex entry (would need robust parsing/validation
+-- that's out of scope here) — the hex line is read-only output.
+function ImGui.ColorEdit3(label, color)
+	local win = currentWindow()
+	local order = nextOrder()
+	local visible, id = splitLabel(label)
+	local name = "col_" .. id
+
+	local initial = color or Color3.new(1, 1, 1)
+	local ih, isat, iv = initial:ToHSV()
+
+	local state = getState(scopedId(win, id), {
+		value = initial,
+		h = ih, s = isat, v = iv,
+		open = false,
+	})
+
+	local row = win.body:FindFirstChild(name)
+
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = name
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, Style.FrameHeight)
+		row.ClipsDescendants = false
+		row.ZIndex = 5
+		row.Parent = win.body
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Name = "Label"
+		lbl.BackgroundTransparency = 1
+		lbl.Size = UDim2.new(1, -40, 1, 0)
+		lbl.Font = Style.Font
+		lbl.TextSize = Style.TextSize
+		lbl.TextColor3 = Style.TextDisabled
+		lbl.TextXAlignment = Enum.TextXAlignment.Left
+		lbl.Parent = row
+
+		local swatch = Instance.new("TextButton")
+		swatch.Name = "Swatch"
+		swatch.AnchorPoint = Vector2.new(1, 0.5)
+		swatch.Position = UDim2.new(1, 0, 0.5, 0)
+		swatch.Size = UDim2.fromOffset(32, 18)
+		swatch.AutoButtonColor = false
+		swatch.Text = ""
+		swatch.Parent = row
+		corner(swatch, Style.FrameRounding)
+
+		-- Popup: PopupBg background, same anchor idea as Combo's list
+		local popup = Instance.new("Frame")
+		popup.Name = "Popup"
+		popup.BackgroundColor3 = Style.PopupBg
+		popup.BackgroundTransparency = Style.PopupBgTransparency
+		popup.AnchorPoint = Vector2.new(1, 0)
+		popup.Position = UDim2.new(1, 0, 1, 4)
+		popup.Size = UDim2.fromOffset(180, 0)
+		popup.AutomaticSize = Enum.AutomaticSize.Y
+		popup.Visible = false
+		popup.ZIndex = 10
+		popup.Parent = row
+		stroke(popup, Style.Border, Style.BorderTransparency, 1)
+
+		local popupLayout = Instance.new("UIListLayout")
+		popupLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		popupLayout.Padding = UDim.new(0, 6)
+		popupLayout.Parent = popup
+
+		local popupPadding = Instance.new("UIPadding")
+		popupPadding.PaddingTop = UDim.new(0, 8)
+		popupPadding.PaddingBottom = UDim.new(0, 8)
+		popupPadding.PaddingLeft = UDim.new(0, 8)
+		popupPadding.PaddingRight = UDim.new(0, 8)
+		popupPadding.Parent = popup
+
+		local preview = Instance.new("Frame")
+		preview.Name = "Preview"
+		preview.Size = UDim2.new(1, 0, 0, 28)
+		preview.LayoutOrder = 1
+		preview.BorderSizePixel = 0
+		preview.Parent = popup
+		corner(preview, Style.FrameRounding)
+
+		local hueBar, hueGrad, hueInd, hueHit = createHSVBar(popup, 2)
+		local satBar, satGrad, satInd, satHit = createHSVBar(popup, 3)
+		local valBar, valGrad, valInd, valHit = createHSVBar(popup, 4)
+
+		-- Hue's gradient is fixed (the full rainbow) and never changes.
+		hueGrad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0.00, Color3.fromHSV(0 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(1 / 6, Color3.fromHSV(1 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(2 / 6, Color3.fromHSV(2 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(3 / 6, Color3.fromHSV(3 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(4 / 6, Color3.fromHSV(4 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(5 / 6, Color3.fromHSV(5 / 6, 1, 1)),
+			ColorSequenceKeypoint.new(1.00, Color3.fromHSV(1, 1, 1)),
+		})
+
+		local hexLabel = Instance.new("TextLabel")
+		hexLabel.Name = "HexLabel"
+		hexLabel.BackgroundTransparency = 1
+		hexLabel.Size = UDim2.new(1, 0, 0, 16)
+		hexLabel.LayoutOrder = 5
+		hexLabel.Font = Style.Font
+		hexLabel.TextSize = Style.TextSize
+		hexLabel.TextColor3 = Style.TextDisabled
+		hexLabel.TextXAlignment = Enum.TextXAlignment.Left
+		hexLabel.Parent = popup
+
+		-- Recomputes everything (swatch, preview, both dependent
+		-- gradients, the three indicator positions, the hex readout)
+		-- from the current state.h/s/v. markChanged is only true when
+		-- called from an actual drag, not from the initial paint.
+		local function recompute(markChanged)
+			state.value = Color3.fromHSV(state.h, state.s, state.v)
+
+			row.Swatch.BackgroundColor3 = state.value
+			preview.BackgroundColor3 = state.value
+
+			satGrad.Color = ColorSequence.new(
+				Color3.fromHSV(state.h, 0, state.v),
+				Color3.fromHSV(state.h, 1, state.v)
+			)
+			valGrad.Color = ColorSequence.new(
+				Color3.fromHSV(state.h, state.s, 0),
+				Color3.fromHSV(state.h, state.s, 1)
+			)
+
+			hueInd.Position = UDim2.new(state.h, 0, 0, 0)
+			satInd.Position = UDim2.new(state.s, 0, 0, 0)
+			valInd.Position = UDim2.new(state.v, 0, 0, 0)
+
+			hexLabel.Text = colorToHex(state.value)
+
+			if markChanged then
+				state.changed = true
+			end
+		end
+
+		-- Wires one bar's Hit TextButton to drag-set a given state field
+		-- (h, s, or v) by horizontal position, then recompute.
+		local function wireBar(bar, hit, field)
+			local dragging = false
+
+			local function setFromX(xPos)
+				local width = bar.AbsoluteSize.X
+				if width <= 0 then return end
+				local rel = math.clamp((xPos - bar.AbsolutePosition.X) / width, 0, 1)
+				state[field] = rel
+				recompute(true)
+			end
+
+			hit.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1
+					or input.UserInputType == Enum.UserInputType.Touch then
+					dragging = true
+					setFromX(input.Position.X)
+				end
+			end)
+
+			UserInputService.InputChanged:Connect(function(input)
+				if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+					or input.UserInputType == Enum.UserInputType.Touch) then
+					setFromX(input.Position.X)
+				end
+			end)
+
+			UserInputService.InputEnded:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1
+					or input.UserInputType == Enum.UserInputType.Touch then
+					dragging = false
+				end
+			end)
+		end
+
+		wireBar(hueBar, hueHit, "h")
+		wireBar(satBar, satHit, "s")
+		wireBar(valBar, valHit, "v")
+
+		swatch.MouseButton1Click:Connect(function()
+			state.open = not state.open
+		end)
+
+		-- Real Roblox Instances (Frame, etc.) have a fixed, engine-
+		-- enforced set of properties — unlike a plain Lua table, you
+		-- cannot bolt an arbitrary field like row._recompute onto one;
+		-- it throws "X is not a valid member of Frame" immediately.
+		-- `state` IS a plain Lua table (from getState), so that's
+		-- where persistent closures/references belong instead.
+		state.recompute = recompute
+	end
+
+	row.LayoutOrder = order
+	row:SetAttribute("_imgui_f", ImGui._frame)
+	row.Label.Text = visible
+	row.Popup.Visible = state.open
+	state.recompute(false)
+
+	local changed = state.changed or false
+	state.changed = false
+
+	return changed, state.value
+end
+
+--========================================================================
+-- SEPARATOR
+--========================================================================
+
+function ImGui.Separator()
+	local win = currentWindow()
+	local order = nextOrder()
+	local name = "sep_" .. order
+
+	local line = win.body:FindFirstChild(name)
+
+	if not line then
+		line = Instance.new("Frame")
+		line.Name = name
+		line.BackgroundColor3 = Style.Border
+		line.BackgroundTransparency = Style.BorderTransparency
+		line.BorderSizePixel = 0
+		line.Size = UDim2.new(1, 0, 0, 1)
+		line.Parent = win.body
+	end
+
+	line.LayoutOrder = order
+	line:SetAttribute("_imgui_f", ImGui._frame)
+end
+
+return ImGui
