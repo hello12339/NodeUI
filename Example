@@ -1,17 +1,19 @@
 --[[
-    DemoUsage.client.lua (Loadstring Version)
+    NodeUI Example Script (Using your Source folder base URL)
 ]]
 
 local RunService = game:GetService("RunService")
 
--- Fetch and load the ImGui library dynamically from GitHub
-local repoUrl = "https://raw.githubusercontent.com/hello12339/NodeUI/main/Source/ImGui.lua"
+-- Your exact base Source URL from GitHub
+local baseUrl = "https://raw.githubusercontent.com/hello12339/NodeUI/refs/heads/main/Source"
+
+-- Automatically targets the main library file inside your Source directory
 local success, result = pcall(function()
-    return game:HttpGet(repoUrl)
+    return game:HttpGet(baseUrl .. "")
 end)
 
-if not success then
-    warn("Failed to fetch ImGui library: " .. tostring(result))
+if not success or not result then
+    warn("Failed to fetch NodeUI library: " .. tostring(result))
     return
 end
 
@@ -19,112 +21,38 @@ local loadSuccess, ImGui = pcall(function()
     return loadstring(result)()
 end)
 
-if not loadSuccess or not ImGui then
-    warn("Failed to load ImGui library: " .. tostring(ImGui))
+if not loadSuccess or type(ImGui) ~= "table" then
+    warn("Failed to initialize NodeUI: " .. tostring(ImGui))
     return
 end
 
--- state you own, just like real ImGui demo apps
-local combatEnabled = true
-local damageMultiplier = 1.5
-local walkSpeed = 16
-local jumpPower = 50
-local nickname = "" -- starts empty; "Player" below is just a hint, never real text
-local difficultyIndex = 2
-local tintColor = Color3.fromRGB(90, 130, 250)
-
-local debugWindowOpen = true
-local difficultyRadio = 1 -- 1=Easy, 2=Normal, 3=Hard
-local loadProgress = 0
+-- Example Demo UI Setup
+local windowOpen = true
+local sliderValue = 50
+local toggleState = false
 
 RunService.Heartbeat:Connect(function(deltaTime)
     ImGui.NewFrame()
 
-    -- ---- Window 1: tabbed debug panel --------------------------------
-    if debugWindowOpen then
-        local open = ImGui.Begin("Debug Panel", {
-            x = 80, y = 80, w = 320, h = 360,
-            closable = true, -- shows the ✕ in the title bar
+    if windowOpen then
+        local open = ImGui.Begin("NodeUI Demo", {
+            x = 100, y = 100, w = 300, h = 250,
+            closable = true,
         })
 
         if open then
-            if ImGui.BeginTabBar("MainTabs") then
-
-                if ImGui.BeginTabItem("Combat") then
-                    local changed
-
-                    changed, combatEnabled = ImGui.Checkbox("Enabled", combatEnabled)
-
-                    changed, damageMultiplier = ImGui.SliderFloat(
-                        "Damage Mult", damageMultiplier, 0.1, 5, "%.2f"
-                    )
-
-                    if ImGui.Button("Reset Combat") then
-                        combatEnabled = true
-                        damageMultiplier = 1.5
-                        print("Combat settings reset")
-                    end
-
-                    ImGui.EndTabItem()
-                end
-
-                if ImGui.BeginTabItem("Movement") then
-                    local changed
-
-                    changed, walkSpeed = ImGui.SliderFloat("WalkSpeed", walkSpeed, 0, 100, "%.0f")
-                    if changed then
-                        local char = game.Players.LocalPlayer.Character
-                        local hum = char and char:FindFirstChildOfClass("Humanoid")
-                        if hum then hum.WalkSpeed = walkSpeed end
-                    end
-
-                    changed, jumpPower = ImGui.SliderFloat("JumpPower", jumpPower, 0, 200, "%.0f")
-
-                    changed, difficultyIndex = ImGui.Combo(
-                        "Difficulty",
-                        { "Easy", "Normal", "Hard", "Nightmare" },
-                        difficultyIndex
-                    )
-
-                    if ImGui.RadioButton("Easy##radio", difficultyRadio == 1) then difficultyRadio = 1 end
-                    if ImGui.RadioButton("Normal##radio", difficultyRadio == 2) then difficultyRadio = 2 end
-                    if ImGui.RadioButton("Hard##radio", difficultyRadio == 3) then difficultyRadio = 3 end
-
-                    ImGui.EndTabItem()
-                end
-
-                ImGui.EndTabBar()
-            end
-
-            ImGui.Separator()
             local changed
-            changed, nickname = ImGui.InputTextWithHint("Nickname", "Player", nickname)
-            changed, tintColor = ImGui.ColorEdit3("Tint", tintColor)
+            changed, toggleState = ImGui.Checkbox("Enable Feature", toggleState)
+            changed, sliderValue = ImGui.SliderFloat("Value", sliderValue, 0, 100, "%.0f")
 
-            loadProgress = (loadProgress + deltaTime * 0.15) % 1
-            ImGui.ProgressBar(loadProgress)
-
-            if ImGui.CollapsingHeader("Advanced") then
-                ImGui.TextDisabled("Hidden until you expand this.")
-                if ImGui.Button("Nested Button") then
-                    print("clicked inside a collapsing header")
-                end
+            if ImGui.Button("Print Status") then
+                print("Feature enabled:", toggleState, "Slider value:", sliderValue)
             end
-
-            ImGui.TextDisabled(("Speed=%.0f  Jump=%.0f  Name=%s"):format(walkSpeed, jumpPower, nickname))
 
             ImGui.End()
         else
-            debugWindowOpen = false
+            windowOpen = false
         end
-    end
-
-    -- ---- Window 2: plain window, no tabs -----------------------------
-    if ImGui.Begin("Stats", { x = 440, y = 80, w = 220, h = 140 }) then
-        local fps = deltaTime > 0 and math.floor(1 / deltaTime) or 0
-        ImGui.Text("FPS: " .. tostring(fps))
-        ImGui.Text("Ping: --")
-        ImGui.End()
     end
 
     ImGui.EndFrame()
