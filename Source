@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -198,6 +199,10 @@ local FocusedWindow = nil
 local TopZIndex = 100
 local focusHookInstalled = false
 
+-- getScreenGui() now prefers gethui() (executor-only protected GUI
+-- container) → CoreGui → PlayerGui, so this library works from an
+-- executor, a Studio plugin, or a normal LocalScript without erroring
+-- on the protected CoreGui service.
 local function getScreenGui()
 	if ScreenGui and ScreenGui.Parent then
 		return ScreenGui
@@ -208,7 +213,25 @@ local function getScreenGui()
 	ScreenGui.ResetOnSpawn = false
 	ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	ScreenGui.DisplayOrder = 100
-	ScreenGui.Parent = PlayerGui
+
+	-- CoreGui is a protected service and can't be parented to from a
+	-- normal LocalScript. Executors provide gethui() for exactly this
+	-- purpose; try it first, then CoreGui, then fall back to PlayerGui
+	-- (where it will still work, just be visible in PlayerGui).
+	local ok = false
+	if gethui then
+		ok = pcall(function()
+			ScreenGui.Parent = gethui()
+		end)
+	end
+	if not ok then
+		ok = pcall(function()
+			ScreenGui.Parent = CoreGui
+		end)
+	end
+	if not ok then
+		ScreenGui.Parent = PlayerGui
+	end
 
 	return ScreenGui
 end
